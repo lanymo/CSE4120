@@ -1,0 +1,10 @@
+int f(bool b, int i) {
+  int x = i;
+  int y = b;
+
+  if (i > 5) {
+    i = i - b * 2;
+  }
+
+  return 0;
+}

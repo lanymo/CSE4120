@@ -1,0 +1,87 @@
+%{
+
+%}
+
+%token NUL TRUE FALSE INT BOOL IF ELSE WHILE RETURN
+%token PLUS MINUS STAR DIVIDE EQUAL NOTEQ LEQ LESS GEQ GREATER AND OR NOT
+%token LPAR LBRA RBRA ASSIGN LSQUA RSQUA
+%token <int> RPAR
+%token <int> SEMICOLON
+%token AMP COMMA
+%token EOF
+%token <int> NUM
+%token <string> ID
+
+%left OR
+%left AND
+%left EQUAL NOTEQ LEQ LESS GEQ GREATER
+%left PLUS MINUS
+%left STAR DIVIDE
+%right NOT
+%right SEMICOLON
+
+%start prog
+%type <AST.Program> prog
+
+%%
+
+exp:  NUL { AST.Null }
+    | NUM { AST.Num $1 }
+    | TRUE { AST.Boolean true }
+    | FALSE { AST.Boolean false }
+    | ID { AST.Var $1 }
+    | STAR ID { AST.Deref $2 }
+    | AMP ID { AST.AddrOf $2 }
+    | ID LSQUA exp RSQUA { AST.Arr ($1, $3) } 
+    | PLUS exp { $2 }
+    | MINUS exp { AST.Neg $2 }
+    | exp PLUS exp { AST.Add ($1, $3) }
+    | exp MINUS exp { AST.Sub ($1, $3) }
+    | exp STAR exp { AST.Mul ($1, $3) }
+    | exp DIVIDE exp { AST.Div ($1, $3) }
+    | exp EQUAL exp { AST.Equal ($1, $3) }
+    | exp NOTEQ exp { AST.NotEq ($1, $3) }
+    | exp LEQ exp { AST.LessEq ($1, $3) }
+    | exp LESS exp { AST.LessThan ($1, $3) }
+    | exp GEQ exp { AST.GreaterEq ($1, $3) }
+    | exp GREATER exp { AST.GreaterThan ($1, $3) }
+    | exp AND exp { AST.And ($1, $3) }
+    | exp OR exp { AST.Or ($1, $3) }
+    | NOT exp { AST.Not $2 }
+    | LPAR exp RPAR { $2 }
+
+ctype:  BOOL { (AST.CBool) }
+        | BOOL STAR { AST.CBoolPtr }
+        | INT { AST.CInt }
+        | INT STAR { AST.CIntPtr }
+
+ctypeid:  BOOL ID { (AST.CBool, $2) }
+        | BOOL STAR ID { (AST.CBoolPtr, $3) }
+        | BOOL ID LSQUA NUM RSQUA { (AST.CBoolArr $4, $2) }
+        | INT ID { (AST.CInt, $2) }
+        | INT STAR ID { (AST.CIntPtr, $3) }
+        | INT ID LSQUA NUM RSQUA { (AST.CIntArr $4, $2) }
+
+stmts:  { [] }
+      | stmt stmts { $1 :: $2 }
+      | SEMICOLON stmts { $2 }
+
+stmt: ctypeid SEMICOLON { AST.Declare ($2, fst $1, snd $1) }
+    | ctypeid ASSIGN exp SEMICOLON { AST.Define ($4, fst $1, snd $1, $3) }
+    | ID ASSIGN exp SEMICOLON { AST.Assign ($4, $1, $3) }
+    | STAR ID ASSIGN exp SEMICOLON { AST.PtrUpdate ($5, $2, $4) }
+    | ID LSQUA exp RSQUA ASSIGN exp SEMICOLON { AST.ArrUpdate ($7, $1, $3, $6) }
+    | RETURN exp SEMICOLON { AST.Return ($3, $2) }
+    | IF LPAR exp RPAR LBRA stmts RBRA elseopt { AST.If ($4, $3, $6, $8) }
+    | WHILE LPAR exp RPAR LBRA stmts RBRA { AST.While ($4, $3, $6) }
+
+elseopt:  { [] }
+        | ELSE LBRA stmts RBRA { $3 }
+
+args: { [] }
+    | ctypeid { [$1] }
+    | ctypeid COMMA args { $1 :: $3 }
+
+func: ctype ID LPAR args RPAR LBRA stmts RBRA { ($1, $2, $4, $7) }
+
+prog: func EOF { $1 }
