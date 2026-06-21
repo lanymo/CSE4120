@@ -66,10 +66,21 @@ module LVAnalysis =
     | Set (r, _) | Load (r, _) | UnOp (r, _, _) | BinOp (r, _, _, _) -> Set.singleton r
     | _ -> Set.empty
 
+  // Registers read by an operand (immediates read nothing).
+  let private regOf (o: Operand) : Set<Register> =
+    match o with
+    | Reg r -> Set.singleton r
+    | Imm _ -> Set.empty
+
   let usedreg (instr : Instr) : Set<Register> =
     match instr with
-    | Set (_, Reg r) | UnOp (_, _, Reg r) | Ret(Reg r) | Store(Reg r, _)-> Set.singleton r
-    | BinOp (_, _, Reg r1, Reg r2)  -> Set.ofList [r1;r2]
+    // Operand may be Reg or Imm, so always extract via regOf (handles the
+    // post-constant-propagation case where one operand became an Imm).
+    | Set (_, o) | UnOp (_, _, o) | Ret o | GotoIf (o, _) | GotoIfNot (o, _) ->
+        regOf o
+    | BinOp (_, _, o1, o2) -> Set.union (regOf o1) (regOf o2)
+    // Store (o, r) means "*r = o": both the value 'o' and the address 'r' are read.
+    | Store (o, r) -> Set.add r (regOf o)
     | Load (_, r) -> Set.singleton r
     | _ -> Set.empty
 
@@ -94,14 +105,17 @@ module LVAnalysis =
           let instr = CFG.getInstr node cfg
           let new_lv_in = transfer lv_out instr
 
-          let outChanged = 
-            match Map.tryFind node outAcc with
-            | Some oldin -> oldin <> new_lv_in
+          // The quantity we iterate on is lv_in, stored in inAcc. Convergence
+          // must compare the new IN against the *old IN* (not the OUT), or the
+          // fixpoint never stabilizes.
+          let inChanged =
+            match Map.tryFind node inAcc with
+            | Some oldIn -> oldIn <> new_lv_in
             | None -> true
-            
+
           let inAcc = Map.add node new_lv_in inAcc
           let outAcc = Map.add node lv_out outAcc
-          (inAcc, outAcc, changed || outChanged)
+          (inAcc, outAcc, changed || inChanged)
         ) (inSet, outSet, false) nodes
 
       if isChanged then iter (updatedInSet, updatedOutSet)
