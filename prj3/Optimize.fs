@@ -145,15 +145,18 @@ module CommonSubexpressionElimination =
 module DeadCodeElimination =
   open LVAnalysis
 
-  // Check if an instruction is live based on the liveness set
-  let isLive (instr: Instr) (lvSet: LVSet) : bool =
+  // A pure definition of r is dead iff r is not live *after* the node, i.e.
+  // r is not in the live-OUT set. (Checking live-IN is wrong: the transfer
+  // function removes the defined reg from IN, so it would look dead always.)
+  let isLive (instr: Instr) (liveOut: LVSet) : bool =
     match instr with
-    | Set (r, _) | UnOp (r, _, _) | BinOp (r, _, _, _) | Load (r, _) -> Set.contains r lvSet
+    | Set (r, _) | UnOp (r, _, _) | BinOp (r, _, _, _) | Load (r, _) -> Set.contains r liveOut
     | _ -> true
 
-  // Eliminate dead code from a single instruction
-  let eliminate (instr: Instr) (lvSet: LVSet) : Instr option =
-    if isLive instr lvSet then Some instr else None
+  // live-OUT[node] = union of live-IN of its successors.
+  let liveOutOf (cfg: CFG) (lvInMap: Map<int, LVSet>) (node: int) : LVSet =
+    CFG.getSuccs node cfg
+    |> List.fold (fun acc s -> Set.union acc (Map.find s lvInMap)) Set.empty
 
   // Apply Dead Code Elimination to all nodes in the CFG
   let rec eliminateNodes (cfg: CFG) (lvMap: Map<int, LVSet>) (nodes: int list) : Instr list =
@@ -161,11 +164,9 @@ module DeadCodeElimination =
     | [] -> []
     | node :: rest ->
         let instr = CFG.getInstr node cfg
-        let lv = Map.find node lvMap
-        let eliminateInstr = eliminate instr lv
-        match eliminateInstr with
-        | Some instr -> instr :: eliminateNodes cfg lvMap rest
-        | None -> eliminateNodes cfg lvMap rest
+        let liveOut = liveOutOf cfg lvMap node
+        if isLive instr liveOut then instr :: eliminateNodes cfg lvMap rest
+        else eliminateNodes cfg lvMap rest
 
   let run instrs =
     let cfg = CFG.make instrs
@@ -214,9 +215,9 @@ let rec optimizeLoop instrs =
   let cf, instrs = ConstantFolding.run instrs
  // let cop, instrs = CopyPropagation.run instrs
  // let cse, instrs = CommonSubexpressionElimination.run instrs
- // let dce, instrs = DeadCodeElimination.run instrs
   let m2r, instrs = Mem2Reg.run instrs
-  if ( cp || cf || m2r) then optimizeLoop instrs else instrs
+  let dce, instrs = DeadCodeElimination.run instrs
+  if ( cp || cf || m2r || dce) then optimizeLoop instrs else instrs
 
 // Optimize input IR code into faster version.
 let run (ir: IRCode) : IRCode =
