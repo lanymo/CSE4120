@@ -30,18 +30,28 @@ module ConstantFolding =
 
 module ConstantPropagation =
   let constantVal (rd: RDSet) (reg: Register) =
-    let isDefined = 
-      Set.filter (fun (i: Instr) -> 
+    // Propagation is sound only when *every* reaching definition of 'reg'
+    // assigns the same constant. Counting only 'Set (reg, Imm _)' is wrong:
+    // at a join point a non-constant definition (Load/BinOp/Set from reg)
+    // may also reach, so we must collect all definitions of 'reg' first.
+    let defs =
+      Set.filter (fun (i: Instr) ->
         match i with
-        | Set (r, Imm v) -> r = reg
+        | Set (r, _) | Load (r, _) | UnOp (r, _, _) | BinOp (r, _, _, _) -> r = reg
         | _ -> false
       ) rd
 
-    if Set.count isDefined = 1 then
-      match Set.minElement isDefined with
+    let constOf i =
+      match i with
       | Set (_, Imm v) -> Some v
       | _ -> None
-    else None
+
+    match Set.toList defs with
+    | [] -> None
+    | head :: tail ->
+        let c = constOf head
+        if Option.isSome c && List.forall (fun i -> constOf i = c) tail then c
+        else None
 
   let rec propagate (instr: Instr) (rd: RDSet) : Instr =
     match instr with
